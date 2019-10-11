@@ -46,8 +46,8 @@ import (
 
 const (
 	caPath           = "/etc/kubernetes/pki/ca.crt"
-	keyPath          = "/etc/kubernetes/pki/ca.key"
-	clusterName      = "kubernetes"
+	regionPath       = "/etc/kubernetes/pki/region"
+	clusterPath      = "/etc/kubernetes/pki/cluster"
 	kubectlConfigKey = "config"
 	defaultNamespace = "default"
 )
@@ -73,9 +73,14 @@ type contextObject struct {
 	Name    string      `yaml:"name"`
 }
 
+type execInfo struct {
+	ApiVersion string   `yaml:"apiVersion"`
+	Args       []string `yaml:"args"`
+	Command	   string   `yaml:"command"`
+}
+
 type userInfo struct {
-	CaData  string `yaml:"client-certificate-data"`
-	KeyData string `yaml:"client-key-data"`
+	Exec execInfo `yaml:"exec"`
 }
 
 type user struct {
@@ -216,6 +221,18 @@ func createKubeConfig(username string) (string, error) {
 		klog.Errorln(err)
 		return "", err
 	}
+	regionBytes, err := ioutil.ReadFile(regionPath)
+	if err != nil {
+		klog.Errorln(err)
+		return "", err
+	}
+	regionName := string(regionBytes)
+	clusterBytes, err := ioutil.ReadFile(clusterPath)
+	if err != nil {
+		klog.Errorln(err)
+		return "", err
+	}
+	clusterName := string(clusterBytes)
 	base64ServerCa := base64.StdEncoding.EncodeToString(serverCa)
 	tmpClusterInfo := clusterInfo{CertificateAuthorityData: base64ServerCa, Server: client.ClientSets().K8s().Master()}
 	tmpCluster := cluster{Cluster: tmpClusterInfo, Name: clusterName}
@@ -225,13 +242,9 @@ func createKubeConfig(username string) (string, error) {
 	tmpContext := contextObject{Context: contextInfo{User: username, Cluster: clusterName, NameSpace: defaultNamespace}, Name: contextName}
 	tmpKubeConfig.Contexts = append(tmpKubeConfig.Contexts, tmpContext)
 
-	cert, key, err := generateCaAndKey(username, caPath, keyPath)
-
-	if err != nil {
-		return "", err
-	}
-
-	tmpUser := user{User: userInfo{CaData: cert, KeyData: key}, Name: username}
+	tmpExecInfo := execInfo{ApiVersion: "client.authentication.k8s.io/v1alpha1", Command: "aws"}
+	tmpExecInfo.Args = append(tmpExecInfo.Args, "--region", regionName, "eks", "get-token", "--cluster-name", clusterName)
+	tmpUser := user{User: userInfo{Exec: tmpExecInfo}, Name: username}
 	tmpKubeConfig.Users = append(tmpKubeConfig.Users, tmpUser)
 	tmpKubeConfig.CurrentContext = contextName
 
